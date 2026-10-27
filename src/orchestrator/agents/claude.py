@@ -11,6 +11,16 @@ from .cli_base import BaseCliAgentRunner
 logger = logging.getLogger(__name__)
 
 
+SKILL_EXECUTION_NOTE = (
+    "IMPORTANT: The Skill tool is disabled. To use a skill named X, Read the file "
+    "./.claude/skills/X/SKILL.md and carry out every step of it yourself, right now, treating any "
+    "arguments you were given as the skill input. When instructions say to spawn a subagent, use "
+    "the Agent tool in the foreground (never run_in_background); it returns the result directly. "
+    "Copy this paragraph verbatim into every subagent prompt. Never sleep, poll the filesystem, "
+    "or schedule wakeups waiting for work: nothing runs unless you or a foreground subagent do it."
+)
+
+
 class ClaudeAgentRunner(BaseCliAgentRunner):
     _ack_lock = threading.Lock()
 
@@ -57,6 +67,8 @@ class ClaudeAgentRunner(BaseCliAgentRunner):
             "stream-json",
             "--verbose",
         ]
+        cmd.extend(["--append-system-prompt", SKILL_EXECUTION_NOTE])
+        cmd.extend(["--disallowedTools", "Skill ScheduleWakeup ListAgents TaskOutput CronCreate Monitor"])
         if model:
             cmd.extend(["--model", model])
         if effort:
@@ -137,6 +149,31 @@ class ClaudeAgentRunner(BaseCliAgentRunner):
             data = parse_json_result(agent_raw_result)
             if data:
                 return data, session_id, None
+
+            if session_id:
+                logger.warning(
+                    f"[AGENT] [{task_id[:8]}] Final answer was not JSON; asking session {session_id} to restate it as JSON"
+                )
+                last_result_obj.clear()
+                retry_cmd = cmd[: cmd.index("-p")] + [
+                    "--resume",
+                    session_id,
+                    "-p",
+                    "Your final answer was not valid JSON. Do not do any more work. "
+                    "Reply now with ONLY the JSON object requested in the original instructions, "
+                    "inside a ```json code block.",
+                ]
+                _, _, retry_rc, _ = self._execute_cmd(
+                    task_id, retry_cmd, abs_env_folder, env, None, handle_event
+                )
+                retry_raw = (
+                    last_result_obj.get("data", {}).get("result")
+                    if last_result_obj.get("data")
+                    else ""
+                )
+                data = parse_json_result(retry_raw)
+                if retry_rc == 0 and data:
+                    return data, session_id, None
 
             return (
                 None,

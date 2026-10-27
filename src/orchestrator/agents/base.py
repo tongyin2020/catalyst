@@ -153,7 +153,7 @@ def write_claude_settings(
 
     new_settings = {
         "sandbox": sandbox_config,
-        "permissions": {"allow": ["WebSearch(*)", "WebFetch(*)", "Bash(*)"]},
+        "permissions": {"allow": ["mcp__ibresearch", "Bash(*)"], "deny": ["WebSearch", "WebFetch"]},
     }
 
     if include_stop_hook:
